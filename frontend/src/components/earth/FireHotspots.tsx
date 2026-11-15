@@ -93,7 +93,8 @@ export const FireHotspots: React.FC<FireHotspotsProps> = ({ radius = 2.0 }) => {
       pos.push(v.x, v.y, v.z);
 
       const p = REALISTIC_HOTSPOTS[index];
-      const frpNorm = Math.min(1.0, p.frp / 380);
+      const frpVal = typeof p.frp === 'number' ? p.frp : 50;
+      const frpNorm = Math.min(1.0, frpVal / 380);
 
       // 1. Core: Defined bright orange-yellow combustion center
       coreCol.push(1.0, 0.92 + frpNorm * 0.08, 0.55 + frpNorm * 0.35);

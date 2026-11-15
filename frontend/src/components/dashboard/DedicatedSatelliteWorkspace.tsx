@@ -286,7 +286,9 @@ export const DedicatedSatelliteWorkspace: React.FC<DedicatedSatelliteWorkspacePr
                     <span className="text-nasa-cyan font-bold truncate max-w-[150px]">
                       {point.satellite}
                     </span>
-                    <span className="text-nasa-orange font-bold">{point.frp} MW</span>
+                    <span className="text-nasa-orange font-bold">
+                      {typeof point.frp === 'number' ? `${point.frp} MW` : 'N/A'}
+                    </span>
                   </div>
                   <h4 className="text-sm font-semibold text-white group-hover:text-nasa-cyan transition-colors truncate">
                     {point.region}
@@ -294,7 +296,7 @@ export const DedicatedSatelliteWorkspace: React.FC<DedicatedSatelliteWorkspacePr
                   <div className="text-[11px] text-slate-400 flex items-center justify-between font-sans">
                     <span>{point.lat.toFixed(3)}°, {point.lon.toFixed(3)}°</span>
                     <span className="text-emerald-400 text-[10px] font-mono font-bold">
-                      {point.confidence}% CONF
+                      {point.confidenceCategory ? `${point.confidenceCategory} CONF` : typeof point.confidence === 'number' ? `${point.confidence}% CONF` : 'NOMINAL CONF'}
                     </span>
                   </div>
                 </div>
@@ -372,7 +374,7 @@ export const DedicatedSatelliteWorkspace: React.FC<DedicatedSatelliteWorkspacePr
             <div className="flex items-center space-x-2">
               <span className="font-bold text-sm text-white truncate">{selectedHotspot.region}</span>
               <span className="text-[10px] px-1.5 py-0.5 rounded bg-nasa-orange/20 text-nasa-orange border border-nasa-orange/30 font-bold">
-                {selectedHotspot.frp} MW
+                {typeof selectedHotspot.frp === 'number' ? `${selectedHotspot.frp} MW` : 'N/A'}
               </span>
             </div>
             <div className="text-[10px] text-slate-400 flex items-center space-x-2">
@@ -680,7 +682,7 @@ export const DedicatedSatelliteWorkspace: React.FC<DedicatedSatelliteWorkspacePr
               {metadata.platform} // {metadata.sensor} ({metadata.scanResolution})
             </div>
             <div className="text-nasa-orange font-bold">
-              Radiative Power: {selectedHotspot.frp} MW
+              Radiative Power: {typeof selectedHotspot.frp === 'number' ? `${selectedHotspot.frp} MW` : 'N/A'}
             </div>
           </div>
         </div>
@@ -713,18 +715,30 @@ export const DedicatedSatelliteWorkspace: React.FC<DedicatedSatelliteWorkspacePr
               <div className="flex items-baseline justify-between pt-1">
                 <div>
                   <div className="text-2xl font-black text-nasa-orange">
-                    {selectedHotspot.frp} <span className="text-xs font-normal text-slate-300">MW</span>
+                    {typeof selectedHotspot.frp === 'number' ? (
+                      <>
+                        {selectedHotspot.frp} <span className="text-xs font-normal text-slate-300">MW</span>
+                      </>
+                    ) : (
+                      <span className="text-sm font-normal text-slate-400">Not reported</span>
+                    )}
                   </div>
                   <div className="text-[10px] text-slate-400 font-sans">
-                    Combustion: {(selectedHotspot.frp * 0.082).toFixed(1)} kg/s
+                    Combustion: {typeof selectedHotspot.frp === 'number' ? `${(selectedHotspot.frp * 0.082).toFixed(1)} kg/s` : 'N/A'}
                   </div>
                 </div>
                 <div className="text-right">
                   <div className="text-base font-bold text-amber-300">
-                    {metadata.brightnessTemp} <span className="text-xs font-normal text-slate-300">K</span>
+                    {typeof metadata.brightnessTemp === 'number' ? (
+                      <>
+                        {metadata.brightnessTemp} <span className="text-xs font-normal text-slate-300">K</span>
+                      </>
+                    ) : (
+                      <span className="text-xs text-slate-400 font-normal">N/A</span>
+                    )}
                   </div>
                   <div className="text-[10px] text-emerald-400 font-mono">
-                    {selectedHotspot.confidence}% CONF
+                    {selectedHotspot.confidenceCategory ? `${selectedHotspot.confidenceCategory} CONF` : typeof selectedHotspot.confidence === 'number' ? `${selectedHotspot.confidence}% CONF` : 'NOMINAL CONF'}
                   </div>
                 </div>
               </div>
@@ -791,11 +805,11 @@ export const DedicatedSatelliteWorkspace: React.FC<DedicatedSatelliteWorkspacePr
                           {p.region}
                         </div>
                         <div className="text-[9px] text-slate-400">
-                          {p.satellite} • {p.confidence}%
+                          {p.satellite} • {p.confidenceCategory ? `${p.confidenceCategory} CONF` : typeof p.confidence === 'number' ? `${p.confidence}%` : 'NOMINAL'}
                         </div>
                       </div>
                       <div className="text-nasa-orange font-bold text-[11px] shrink-0">
-                        {p.frp} MW
+                        {typeof p.frp === 'number' ? `${p.frp} MW` : 'N/A'}
                       </div>
                     </div>
                   );

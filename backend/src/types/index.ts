@@ -18,6 +18,7 @@ export interface BoundingBoxQuery {
 
 export interface FireQueryParams extends BoundingBoxQuery {
   confidence?: number;
+  confidenceCategory?: 'LOW' | 'NOMINAL' | 'HIGH';
   minFrp?: number;
   satellite?: string;
   sensor?: string;
@@ -33,23 +34,29 @@ export interface EnrichedFireObservationDto {
   id: string;
   lat: number;
   lon: number;
-  frp: number;
-  confidence: number;
-  brightnessTempK: number;
-  brightnessTempC: number;
+  frp: number | null;
+  confidence: number | null;
+  confidenceRaw: string | null;
+  confidenceCategory: 'LOW' | 'NOMINAL' | 'HIGH' | null;
+  brightnessTempK: number | null;
+  brightnessTempC: number | null;
   satellite: string;
+  satelliteCode: string | null;
   sensor: string;
   sensorFamily: 'VIIRS' | 'MODIS';
   dayNight: string;
   scanResolution: string;
+  version: string | null;
+  sourceDataset: string;
   observationTime: string;
   acquisitionDate: string;
+  ingestedAt: string | null;
   country: string;
   continent: string;
   region: string;
   incidentId: string | null;
   incidentName: string | null;
-  biomassCombustionRateKgS: number;
+  biomassCombustionRateKgS: number | null;
   isNewDetection: boolean;
   hoursAgo: number;
 }
@@ -98,8 +105,8 @@ export interface RegionalActivityMetric {
   country: string;
   continent: string;
   count: number;
-  avgFrp: number;
-  maxFrp: number;
+  avgFrp: number | null;
+  maxFrp: number | null;
   riskLevel: 'Extreme' | 'Severe' | 'Elevated' | 'Moderate';
   trend: string;
   center: [number, number];

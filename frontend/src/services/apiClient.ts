@@ -6,25 +6,39 @@ export interface ApiObservation {
   id: string;
   lat: number;
   lon: number;
-  frp: number;
-  confidence: number;
-  brightnessTempK: number;
-  brightnessTempC: number;
+  frp: number | null;
+  confidence: number | null;
+  confidenceRaw?: string | null;
+  confidenceCategory?: 'LOW' | 'NOMINAL' | 'HIGH' | null;
+  brightnessTempK: number | null;
+  brightnessTempC: number | null;
   satellite: string;
+  satelliteCode?: string | null;
   sensor: string;
   sensorFamily: 'VIIRS' | 'MODIS';
   dayNight: string;
   scanResolution: string;
+  version?: string | null;
+  sourceDataset: string;
   observationTime: string;
   acquisitionDate: string;
+  ingestedAt?: string | null;
   country: string;
   continent: string;
   region: string;
   incidentId: string | null;
   incidentName: string | null;
-  biomassCombustionRateKgS: number;
+  biomassCombustionRateKgS: number | null;
   isNewDetection: boolean;
   hoursAgo: number;
+}
+
+export interface ApiPaginatedResponse<T> {
+  items: T[];
+  total: number;
+  limit: number;
+  offset: number;
+  timestamp: string;
 }
 
 export interface ApiOverviewMetrics {
@@ -103,6 +117,99 @@ export interface UserAuthData {
   token: string;
 }
 
+export interface ApiHarmonizationRun {
+  id: string;
+  regionName: string;
+  minLat: number | null;
+  maxLat: number | null;
+  minLon: number | null;
+  maxLon: number | null;
+  startDate: string | null;
+  endDate: string | null;
+  gridResolutionM: number;
+  spatialCrs: string;
+  spatialDistanceM: number;
+  timeWindowMinutes: number;
+  status: 'RUNNING' | 'COMPLETED' | 'PARTIAL' | 'FAILED';
+  totalInputObservations: number;
+  validModisCount: number;
+  validViirsCount: number;
+  rejectedCount: number;
+  candidateMatchCount: number;
+  modisOnlyCount: number;
+  viirsOnlyCount: number;
+  uniqueGridCells: number;
+  scientificNotes: Record<string, string> | null;
+  errorMessage: string | null;
+  createdAt: string;
+  completedAt: string | null;
+}
+
+export interface ApiHarmonizedMatch {
+  id: string;
+  runId: string;
+  matchKey: string;
+  matchClass: 'CANDIDATE_MATCH' | 'MODIS_ONLY' | 'VIIRS_ONLY';
+  modisObservationId: string | null;
+  viirsObservationId: string | null;
+  gridCellId: string;
+  spatialCrs: string;
+  gridResolutionM: number;
+  distanceM: number | null;
+  timeDiffMinutes: number | null;
+  matchScore: number | null;
+  acqDate: string;
+  modisObservation?: {
+    id: string;
+    latitude: number;
+    longitude: number;
+    satellitePlatform: string;
+    observationTime: string;
+    frp: number | null;
+    brightnessTemp: number | null;
+    confidence: number | null;
+    confidenceRaw: string | null;
+    confidenceCategory: string | null;
+    sourceDataset: string;
+  } | null;
+  viirsObservation?: {
+    id: string;
+    latitude: number;
+    longitude: number;
+    satellitePlatform: string;
+    observationTime: string;
+    frp: number | null;
+    brightnessTemp: number | null;
+    confidence: number | null;
+    confidenceRaw: string | null;
+    confidenceCategory: string | null;
+    sourceDataset: string;
+  } | null;
+}
+
+export interface ApiHarmonizedDailySummary {
+  id: string;
+  runId: string;
+  date: string;
+  regionName: string;
+  modisCount: number;
+  viirsCount: number;
+  candidateMatchCount: number;
+  modisOnlyCount: number;
+  viirsOnlyCount: number;
+  uniqueGridCells: number;
+  modisValidFrpCount: number;
+  modisFrpSumMw: number | null;
+  modisFrpMeanMw: number | null;
+  modisFrpMaxMw: number | null;
+  viirsValidFrpCount: number;
+  viirsFrpSumMw: number | null;
+  viirsFrpMeanMw: number | null;
+  viirsFrpMaxMw: number | null;
+  estimatedBurnedAreaHa: number | null;
+  provenanceAndNotes: Record<string, unknown> | null;
+}
+
 class ApiClient {
   private token: string | null = null;
   private backendLive = true;
@@ -156,79 +263,128 @@ class ApiClient {
     }
   }
 
-  // Dashboard Overview
-  public async getDashboardOverview(): Promise<ApiOverviewMetrics> {
+  private async requestFull<T>(path: string, options: RequestInit = {}): Promise<{ data: T; meta?: any }> {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...((options.headers as Record<string, string>) || {})
+    };
+
+    if (this.token) {
+      headers['Authorization'] = `Bearer ${this.token}`;
+    }
+
     try {
-      return await this.request<ApiOverviewMetrics>('/dashboard/overview');
-    } catch {
-      // Offline fallback
-      return {
-        activeDetections: GLOBAL_HOTSPOTS.length,
-        newDetections: Math.round(GLOBAL_HOTSPOTS.length * 0.8),
-        highConfidenceDetections: GLOBAL_HOTSPOTS.length,
-        highConfidencePct: 100,
-        affectedCountriesCount: 14,
-        affectedContinentsCount: 6,
-        avgFrp: Math.round(GLOBAL_HOTSPOTS.reduce((s, h) => s + h.frp, 0) / GLOBAL_HOTSPOTS.length),
-        peakFrp: Math.max(...GLOBAL_HOTSPOTS.map((h) => h.frp)),
-        peakFrpHotspot: null,
-        latestObservation: null,
-        previousCycleDetections: Math.round(GLOBAL_HOTSPOTS.length * 0.94),
-        trendPercentage: 6.2,
-        lastUpdatedUtc: new Date().toISOString()
-      };
+      const response = await fetch(`${API_BASE}${path}`, {
+        ...options,
+        headers
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const json = await response.json();
+      this.backendLive = true;
+      return { data: json.data, meta: json.meta };
+    } catch (err) {
+      this.backendLive = false;
+      throw err;
     }
   }
 
-  // Fires
-  public async getFires(params?: {
+  // Dashboard Overview
+  public async getDashboardOverview(): Promise<ApiOverviewMetrics> {
+    return await this.request<ApiOverviewMetrics>('/dashboard/overview');
+  }
+
+  // Fires Paginated Query
+  public async getFiresPaginated(params?: {
     limit?: number;
+    offset?: number;
     minLat?: number;
     maxLat?: number;
     minLon?: number;
     maxLon?: number;
     confidence?: number;
+    confidenceCategory?: string;
     minFrp?: number;
-  }): Promise<ApiObservation[]> {
-    try {
-      const qs = new URLSearchParams();
-      if (params?.limit) qs.set('limit', String(params.limit));
-      if (params?.minLat !== undefined) qs.set('minLat', String(params.minLat));
-      if (params?.maxLat !== undefined) qs.set('maxLat', String(params.maxLat));
-      if (params?.minLon !== undefined) qs.set('minLon', String(params.minLon));
-      if (params?.maxLon !== undefined) qs.set('maxLon', String(params.maxLon));
-      if (params?.confidence !== undefined) qs.set('confidence', String(params.confidence));
-      if (params?.minFrp !== undefined) qs.set('minFrp', String(params.minFrp));
+    sensor?: string;
+    satellite?: string;
+    dayNight?: string;
+    sortBy?: string;
+    sortOrder?: 'asc' | 'desc';
+    timeRange?: string;
+  }): Promise<ApiPaginatedResponse<ApiObservation>> {
+    const qs = new URLSearchParams();
+    if (params?.limit !== undefined) qs.set('limit', String(params.limit));
+    if (params?.offset !== undefined) qs.set('offset', String(params.offset));
+    if (params?.minLat !== undefined) qs.set('minLat', String(params.minLat));
+    if (params?.maxLat !== undefined) qs.set('maxLat', String(params.maxLat));
+    if (params?.minLon !== undefined) qs.set('minLon', String(params.minLon));
+    if (params?.maxLon !== undefined) qs.set('maxLon', String(params.maxLon));
+    if (params?.confidence !== undefined) qs.set('confidence', String(params.confidence));
+    if (params?.confidenceCategory) qs.set('confidenceCategory', params.confidenceCategory);
+    if (params?.minFrp !== undefined) qs.set('minFrp', String(params.minFrp));
+    if (params?.sensor) qs.set('sensor', params.sensor);
+    if (params?.satellite) qs.set('satellite', params.satellite);
+    if (params?.dayNight) qs.set('dayNight', params.dayNight);
+    if (params?.sortBy) qs.set('sortBy', params.sortBy);
+    if (params?.sortOrder) qs.set('sortOrder', params.sortOrder);
+    if (params?.timeRange) qs.set('timeRange', params.timeRange);
 
-      const queryStr = qs.toString() ? `?${qs.toString()}` : '';
-      return await this.request<ApiObservation[]>(`/fires${queryStr}`);
-    } catch {
-      // Fallback to local GLOBAL_HOTSPOTS
-      return GLOBAL_HOTSPOTS.map((h) => ({
-        id: h.id,
-        lat: h.lat,
-        lon: h.lon,
-        frp: h.frp,
-        confidence: h.confidence,
-        brightnessTempK: Math.round(335 + (h.frp / 440) * 55),
-        brightnessTempC: Math.round(335 + (h.frp / 440) * 55 - 273.15),
-        satellite: h.satellite,
-        sensor: h.satellite.includes('VIIRS') ? 'VIIRS' : 'MODIS',
-        sensorFamily: h.satellite.includes('VIIRS') ? 'VIIRS' : 'MODIS',
-        dayNight: 'Day (Ascending)',
-        scanResolution: h.satellite.includes('VIIRS') ? '375m I-Band' : '1000m Multi-spectral',
-        observationTime: new Date().toISOString(),
-        acquisitionDate: new Date().toISOString(),
-        country: h.region.split(' ')[0] || 'Global',
-        continent: 'Global',
-        region: h.region,
-        incidentId: null,
-        incidentName: null,
-        biomassCombustionRateKgS: Number((h.frp * 0.082).toFixed(1)),
-        isNewDetection: true,
-        hoursAgo: 1
-      }));
+    const queryStr = qs.toString() ? `?${qs.toString()}` : '';
+    const res = await this.requestFull<ApiObservation[]>(`/fires${queryStr}`);
+    return {
+      items: res.data || [],
+      total: res.meta?.total ?? (res.data ? res.data.length : 0),
+      limit: res.meta?.limit ?? (params?.limit || 500),
+      offset: res.meta?.offset ?? (params?.offset || 0),
+      timestamp: res.meta?.timestamp ?? new Date().toISOString()
+    };
+  }
+
+  // Fires Batch or All Query
+  public async getFires(params?: {
+    limit?: number;
+    offset?: number;
+    minLat?: number;
+    maxLat?: number;
+    minLon?: number;
+    maxLon?: number;
+    confidence?: number;
+    confidenceCategory?: string;
+    minFrp?: number;
+    sensor?: string;
+    satellite?: string;
+    dayNight?: string;
+    sortBy?: string;
+    sortOrder?: 'asc' | 'desc';
+    timeRange?: string;
+    fetchAll?: boolean;
+  }): Promise<ApiObservation[]> {
+    if (params?.fetchAll) {
+      const pageSize = 5000;
+      let offset = 0;
+      let allItems: ApiObservation[] = [];
+      let total = Infinity;
+
+      while (allItems.length < total) {
+        const page = await this.getFiresPaginated({
+          ...params,
+          limit: pageSize,
+          offset
+        });
+        total = page.total;
+        if (!page.items || page.items.length === 0) break;
+        allItems = allItems.concat(page.items);
+        offset += page.items.length;
+        if (offset >= total) break;
+      }
+      return allItems;
     }
+
+    const res = await this.getFiresPaginated(params);
+    return res.items;
   }
 
   // Incidents
@@ -287,6 +443,123 @@ class ApiClient {
   // Current User
   public async getMe() {
     return this.request<any>('/auth/me');
+  }
+
+  // Harmonization API (/api/harmonization/*)
+  private async requestHarmonization<T>(path: string, options: RequestInit = {}): Promise<{ data: T; meta?: any }> {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...((options.headers as Record<string, string>) || {})
+    };
+    if (this.token) {
+      headers['Authorization'] = `Bearer ${this.token}`;
+    }
+
+    const response = await fetch(`/api/harmonization${path}`, {
+      ...options,
+      headers
+    });
+    const json = await response.json().catch(() => null);
+    if (!response.ok) {
+      throw new Error(json?.error || `HTTP ${response.status}: ${response.statusText}`);
+    }
+    this.backendLive = true;
+    return { data: json.data, meta: json.meta };
+  }
+
+  public async runHarmonization(params: {
+    regionName?: string;
+    minLat?: number;
+    maxLat?: number;
+    minLon?: number;
+    maxLon?: number;
+    startDate?: string;
+    endDate?: string;
+    spatialDistanceM?: number;
+    timeWindowMinutes?: number;
+    gridResolutionM?: number;
+  }) {
+    const res = await this.requestHarmonization<{
+      run: ApiHarmonizationRun;
+      summary: Record<string, number>;
+      dailySummaries: ApiHarmonizedDailySummary[];
+      scientificNotes: Record<string, string>;
+    }>('/run', {
+      method: 'POST',
+      body: JSON.stringify(params)
+    });
+    return res.data;
+  }
+
+  public async getHarmonizationStatus() {
+    const res = await this.requestHarmonization<{
+      latestRun: ApiHarmonizationRun | null;
+      recentRuns: ApiHarmonizationRun[];
+    }>('/status');
+    return res.data;
+  }
+
+  public async getHarmonizationResults(params?: {
+    runId?: string;
+    matchClass?: 'CANDIDATE_MATCH' | 'MODIS_ONLY' | 'VIIRS_ONLY';
+    limit?: number;
+    offset?: number;
+  }) {
+    const qs = new URLSearchParams();
+    if (params?.runId) qs.set('runId', params.runId);
+    if (params?.matchClass) qs.set('matchClass', params.matchClass);
+    if (params?.limit) qs.set('limit', String(params.limit));
+    if (params?.offset) qs.set('offset', String(params.offset));
+    const queryStr = qs.toString() ? `?${qs.toString()}` : '';
+
+    const res = await this.requestHarmonization<{
+      run: ApiHarmonizationRun | null;
+      items: ApiHarmonizedMatch[];
+    }>(`/results${queryStr}`);
+    return { ...res.data, total: res.meta?.total ?? res.data.items.length };
+  }
+
+  public async getHarmonizationDaily(params?: { runId?: string; startDate?: string; endDate?: string }) {
+    const qs = new URLSearchParams();
+    if (params?.runId) qs.set('runId', params.runId);
+    if (params?.startDate) qs.set('startDate', params.startDate);
+    if (params?.endDate) qs.set('endDate', params.endDate);
+    const queryStr = qs.toString() ? `?${qs.toString()}` : '';
+
+    const res = await this.requestHarmonization<{
+      run: ApiHarmonizationRun | null;
+      daily: ApiHarmonizedDailySummary[];
+    }>(`/daily${queryStr}`);
+    return res.data;
+  }
+
+  public getHarmonizationExportUrl(params?: {
+    runId?: string;
+    format?: 'csv' | 'geojson';
+    type?: 'matches' | 'daily';
+    matchClass?: 'CANDIDATE_MATCH' | 'MODIS_ONLY' | 'VIIRS_ONLY';
+  }): string {
+    const qs = new URLSearchParams();
+    if (params?.runId) qs.set('runId', params.runId);
+    if (params?.format) qs.set('format', params.format);
+    if (params?.type) qs.set('type', params.type);
+    if (params?.matchClass) qs.set('matchClass', params.matchClass);
+    return `/api/harmonization/export?${qs.toString()}`;
+  }
+
+  public downloadHarmonizationExport(params?: {
+    runId?: string;
+    format?: 'csv' | 'geojson';
+    type?: 'matches' | 'daily';
+    matchClass?: 'CANDIDATE_MATCH' | 'MODIS_ONLY' | 'VIIRS_ONLY';
+  }): void {
+    const url = this.getHarmonizationExportUrl(params);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', '');
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   }
 }
 

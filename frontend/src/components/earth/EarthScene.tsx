@@ -1,6 +1,7 @@
 import React, { Suspense, useRef } from 'react';
 import * as THREE from 'three';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
+import { OrbitControls } from '@react-three/drei';
 import { EarthGlobe } from './EarthGlobe';
 import { SatellitesOrbit } from '../satellites/SatelliteOrbit';
 import { Starfield } from './Starfield';
@@ -194,17 +195,23 @@ const SceneLoadingFallback: React.FC = () => {
 };
 
 interface EarthSceneProps {
-  scrollProgress: number;
-  selectedSatellite: 'MODIS' | 'VIIRS' | null;
+  scrollProgress?: number;
+  selectedSatellite?: 'MODIS' | 'VIIRS' | null;
   onSelectSatellite?: (id: 'MODIS' | 'VIIRS' | null) => void;
   isMapExpanded?: boolean;
+  enableControls?: boolean;
+  autoRotate?: boolean;
+  autoRotateSpeed?: number;
 }
 
 export const EarthScene: React.FC<EarthSceneProps> = ({
-  scrollProgress,
-  selectedSatellite,
+  scrollProgress = 0,
+  selectedSatellite = null,
   onSelectSatellite,
   isMapExpanded = false,
+  enableControls = false,
+  autoRotate = false,
+  autoRotateSpeed = 0.5,
 }) => {
   const sunDirection = React.useMemo(
     () => new THREE.Vector3(-5, 4, 5).normalize(),
@@ -228,6 +235,18 @@ export const EarthScene: React.FC<EarthSceneProps> = ({
         className="w-full h-full"
         style={{ touchAction: 'pan-y' }}
       >
+        {enableControls && (
+          <OrbitControls
+            enablePan={false}
+            enableZoom={true}
+            minDistance={3.2}
+            maxDistance={8.5}
+            autoRotate={autoRotate}
+            autoRotateSpeed={autoRotateSpeed}
+            rotateSpeed={0.6}
+            zoomSpeed={0.8}
+          />
+        )}
         {/* Deep space ambient fill light - balanced for terrain readability and cosmic contrast */}
         <ambientLight color="#081628" intensity={0.28} />
 

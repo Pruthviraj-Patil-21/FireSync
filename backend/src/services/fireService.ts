@@ -73,10 +73,15 @@ export class FireService {
    */
   public static enrichObservation(obs: any): EnrichedFireObservationDto {
     const loc = classifyLocation(obs.latitude, obs.longitude);
-    const frp = obs.frp || 180;
-    const brightnessTempK = obs.brightnessTemp || Math.round(335 + (frp / 440) * 55);
-    const brightnessTempC = Math.round(brightnessTempK - 273.15);
-    const isViirs = (obs.sensor || '').toUpperCase().includes('VIIRS') || (obs.satellitePlatform || '').toUpperCase().includes('VIIRS') || obs.satellitePlatform === 'Suomi-NPP' || obs.satellitePlatform === 'NOAA-20';
+    const frp = typeof obs.frp === 'number' && Number.isFinite(obs.frp) ? obs.frp : null;
+    const brightnessTempK = typeof obs.brightnessTemp === 'number' && Number.isFinite(obs.brightnessTemp) ? obs.brightnessTemp : null;
+    const brightnessTempC = brightnessTempK !== null ? Math.round(brightnessTempK - 273.15) : null;
+    const isViirs =
+      (obs.sensor || '').toUpperCase().includes('VIIRS') ||
+      (obs.satellitePlatform || '').toUpperCase().includes('VIIRS') ||
+      obs.satellitePlatform === 'Suomi-NPP' ||
+      obs.satellitePlatform === 'NOAA-20' ||
+      obs.satellitePlatform === 'NOAA-21';
     const sensorFamily = isViirs ? 'VIIRS' : 'MODIS';
     const hoursAgo = Math.max(0, Math.round((Date.now() - new Date(obs.observationTime).getTime()) / (3600 * 1000)));
 
@@ -85,22 +90,28 @@ export class FireService {
       lat: obs.latitude,
       lon: obs.longitude,
       frp,
-      confidence: obs.confidence,
+      confidence: obs.confidence ?? null,
+      confidenceRaw: obs.confidenceRaw ?? (obs.confidence !== null && obs.confidence !== undefined ? String(obs.confidence) : null),
+      confidenceCategory: obs.confidenceCategory ?? null,
       brightnessTempK,
       brightnessTempC,
       satellite: obs.satellitePlatform,
+      satelliteCode: obs.satelliteCode ?? null,
       sensor: obs.sensor,
       sensorFamily,
       dayNight: obs.dayNight || 'Day (Ascending)',
       scanResolution: obs.scan ? `${obs.scan * 1000}m` : isViirs ? '375m I-Band' : '1000m Multi-spectral',
+      version: obs.version ?? null,
+      sourceDataset: obs.sourceDataset,
       observationTime: obs.observationTime.toISOString(),
       acquisitionDate: obs.acquisitionDate.toISOString(),
+      ingestedAt: obs.ingestedAt ? obs.ingestedAt.toISOString() : null,
       country: loc.country,
       continent: loc.continent,
       region: loc.region,
       incidentId: obs.incidentId || null,
       incidentName: obs.incident ? obs.incident.name : null,
-      biomassCombustionRateKgS: Number((frp * 0.082).toFixed(1)),
+      biomassCombustionRateKgS: frp !== null ? Number((frp * 0.082).toFixed(1)) : null,
       isNewDetection: hoursAgo <= 6,
       hoursAgo
     };
@@ -109,7 +120,7 @@ export class FireService {
   /**
    * Filter and query fire observations
    */
-  public static async queryFires(params: FireQueryParams): Promise<{ items: EnrichedFireObservationDto[]; total: number }> {
+  public static async queryFires(params: FireQueryParams): Promise<{ items: EnrichedFireObservationDto[]; total: number; limit: number; offset: number }> {
     const where: any = {};
 
     // Bounding Box
@@ -123,6 +134,9 @@ export class FireService {
     // Confidence
     if (params.confidence !== undefined) {
       where.confidence = { gte: params.confidence };
+    }
+    if (params.confidenceCategory) {
+      where.confidenceCategory = params.confidenceCategory.toUpperCase();
     }
 
     // Min FRP
@@ -150,7 +164,7 @@ export class FireService {
       where.observationTime = { gte: new Date(Date.now() - hours * 3600 * 1000) };
     }
 
-    const limit = Math.min(params.limit || 500, 2000);
+    const limit = Math.min(params.limit || 500, 10000);
     const offset = params.offset || 0;
 
     const orderBy: any = {};
@@ -171,7 +185,9 @@ export class FireService {
 
     return {
       items: items.map(this.enrichObservation),
-      total
+      total,
+      limit,
+      offset
     };
   }
 
@@ -221,15 +237,21 @@ export class FireService {
 
     const enriched = all.map(this.enrichObservation);
     const totalDetections = enriched.length;
-    const highConf = enriched.filter((h) => h.confidence >= 80);
+    const highConf = enriched.filter(
+      (h) => h.confidenceCategory === 'HIGH' || (h.confidence !== null && h.confidence >= 80)
+    );
     const newDetections = enriched.filter((h) => h.isNewDetection);
 
     const countries = new Set(enriched.map((h) => h.country));
     const continents = new Set(enriched.map((h) => h.continent));
 
-    const totalFrp = enriched.reduce((sum, h) => sum + h.frp, 0);
-    const avgFrp = totalDetections > 0 ? Math.round(totalFrp / totalDetections) : 0;
-    const peakFrpHotspot = enriched.length > 0 ? enriched[0] : null;
+    const obsWithFrp = enriched.filter((h) => typeof h.frp === 'number');
+    const totalFrp = obsWithFrp.reduce((sum, h) => sum + (h.frp as number), 0);
+    const avgFrp = obsWithFrp.length > 0 ? Math.round(totalFrp / obsWithFrp.length) : 0;
+    const peakFrpHotspot = obsWithFrp.length > 0
+      ? [...obsWithFrp].sort((a, b) => (b.frp as number) - (a.frp as number))[0]
+      : null;
+    const peakFrp = peakFrpHotspot && typeof peakFrpHotspot.frp === 'number' ? peakFrpHotspot.frp : 0;
     const latestObservation =
       enriched.length > 0
         ? [...enriched].sort((a, b) => new Date(b.observationTime).getTime() - new Date(a.observationTime).getTime())[0]
@@ -246,7 +268,7 @@ export class FireService {
       affectedCountriesCount: countries.size,
       affectedContinentsCount: continents.size,
       avgFrp,
-      peakFrp: peakFrpHotspot ? peakFrpHotspot.frp : 0,
+      peakFrp,
       peakFrpHotspot,
       latestObservation,
       previousCycleDetections: previousCycle,
@@ -272,15 +294,16 @@ export class FireService {
     const metrics: RegionalActivityMetric[] = [];
     for (const [key, group] of groupMap.entries()) {
       const count = group.length;
-      const sumFrp = group.reduce((acc, g) => acc + g.frp, 0);
-      const avgFrp = Math.round(sumFrp / count);
-      const maxFrp = Math.max(...group.map((g) => g.frp));
+      const withFrp = group.filter((g) => typeof g.frp === 'number');
+      const sumFrp = withFrp.reduce((acc, g) => acc + (g.frp as number), 0);
+      const avgFrp = withFrp.length > 0 ? Math.round(sumFrp / withFrp.length) : null;
+      const maxFrp = withFrp.length > 0 ? Math.max(...withFrp.map((g) => g.frp as number)) : null;
       const first = group[0];
 
       let riskLevel: 'Extreme' | 'Severe' | 'Elevated' | 'Moderate' = 'Moderate';
-      if (avgFrp >= 350 || count >= 15) riskLevel = 'Extreme';
-      else if (avgFrp >= 300 || count >= 10) riskLevel = 'Severe';
-      else if (avgFrp >= 250 || count >= 5) riskLevel = 'Elevated';
+      if ((avgFrp !== null && avgFrp >= 350) || count >= 15) riskLevel = 'Extreme';
+      else if ((avgFrp !== null && avgFrp >= 300) || count >= 10) riskLevel = 'Severe';
+      else if ((avgFrp !== null && avgFrp >= 250) || count >= 5) riskLevel = 'Elevated';
 
       metrics.push({
         name: key,

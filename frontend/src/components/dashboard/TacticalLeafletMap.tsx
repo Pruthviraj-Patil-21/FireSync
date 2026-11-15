@@ -14,15 +14,39 @@ import {
 } from 'lucide-react';
 import { GLOBAL_HOTSPOTS, HotspotPoint } from '../earth/fireData';
 
-// Helper component to smoothly pan map when a hotspot is selected
+// Helper component to smoothly pan map when a hotspot is selected and invalidate size
 const MapViewController: React.FC<{
   center: [number, number];
   zoom: number;
-}> = ({ center, zoom }) => {
+  isExpanded?: boolean;
+}> = ({ center, zoom, isExpanded }) => {
   const map = useMap();
+
   React.useEffect(() => {
-    map.flyTo(center, zoom, { duration: 1.2 });
+    const triggerInvalidate = () => {
+      try {
+        map.invalidateSize();
+      } catch (e) {}
+    };
+    triggerInvalidate();
+    const t1 = setTimeout(triggerInvalidate, 80);
+    const t2 = setTimeout(triggerInvalidate, 250);
+    const t3 = setTimeout(triggerInvalidate, 600);
+    window.addEventListener('resize', triggerInvalidate);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+      clearTimeout(t3);
+      window.removeEventListener('resize', triggerInvalidate);
+    };
+  }, [map, isExpanded]);
+
+  React.useEffect(() => {
+    try {
+      map.flyTo(center, zoom, { duration: 1.2 });
+    } catch (e) {}
   }, [center, zoom, map]);
+
   return null;
 };
 
@@ -169,22 +193,33 @@ export const TacticalLeafletMap: React.FC<TacticalLeafletMapProps> = ({
           attributionControl={false}
           className="w-full h-full"
         >
-          <MapViewController center={mapCenter} zoom={mapZoom} />
+          <MapViewController center={mapCenter} zoom={mapZoom} isExpanded={isExpanded} />
           <MapControls />
 
-          {/* NASA Dark Matter Cartographic Tiles */}
+          {/* NASA Dark Matter Cartographic Tiles with Boundaries & Labels */}
           <TileLayer
-            url="https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}"
-            attribution='Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ'
-            maxZoom={16}
+            url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+            subdomains={['a', 'b', 'c', 'd']}
+            maxZoom={19}
           />
 
           {/* Hotspot Markers */}
           {visibleHotspots.map((spot) => {
             const isSelected = selectedHotspot?.id === spot.id;
             const markerColor =
-              spot.frp > 300 ? '#ff1744' : spot.frp > 260 ? '#ff6d00' : '#ffab00';
-            const radius = isSelected ? 7 : Math.max(3.5, (spot.frp / 400) * 6);
+              typeof spot.frp === 'number'
+                ? spot.frp > 300
+                  ? '#ff1744'
+                  : spot.frp > 260
+                  ? '#ff6d00'
+                  : '#ffab00'
+                : '#00e5ff';
+            const radius = isSelected
+              ? 7
+              : typeof spot.frp === 'number'
+              ? Math.max(3.5, (spot.frp / 400) * 6)
+              : 4;
 
             return (
               <CircleMarker

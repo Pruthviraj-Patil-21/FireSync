@@ -31,7 +31,8 @@ export function createWildfireEmissiveTexture(): THREE.CanvasTexture {
     const y = toY(p.lat);
 
     // Visible, defined hotspot radiance: sharp bright orange-red core with restrained warm halo
-    const coreRadius = 3.2 + (p.frp / 400) * 1.8; // 3.8 to 5.0 px (readable at globe scale)
+    const frpVal = typeof p.frp === 'number' ? p.frp : 50;
+    const coreRadius = 3.2 + (frpVal / 400) * 1.8; // 3.8 to 5.0 px (readable at globe scale)
     const haloRadius = coreRadius * 2.0;          // 7.6 to 10.0 px
 
     // 1. Defined warm ember margin (restrained, no blurry haze)

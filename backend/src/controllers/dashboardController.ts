@@ -65,8 +65,11 @@ export class DashboardController {
       const viirs = all.items.filter((i) => i.sensorFamily === 'VIIRS');
       const modis = all.items.filter((i) => i.sensorFamily === 'MODIS');
 
-      const avgViirsFrp = viirs.length > 0 ? Math.round(viirs.reduce((s, x) => s + x.frp, 0) / viirs.length) : 0;
-      const avgModisFrp = modis.length > 0 ? Math.round(modis.reduce((s, x) => s + x.frp, 0) / modis.length) : 0;
+      const viirsWithFrp = viirs.filter((x) => typeof x.frp === 'number');
+      const modisWithFrp = modis.filter((x) => typeof x.frp === 'number');
+
+      const avgViirsFrp = viirsWithFrp.length > 0 ? Math.round(viirsWithFrp.reduce((s, x) => s + (x.frp as number), 0) / viirsWithFrp.length) : 0;
+      const avgModisFrp = modisWithFrp.length > 0 ? Math.round(modisWithFrp.reduce((s, x) => s + (x.frp as number), 0) / modisWithFrp.length) : 0;
 
       res.json({
         success: true,

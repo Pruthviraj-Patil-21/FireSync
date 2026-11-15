@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { FireService } from '../services/fireService';
+import { FirmsIngestionService } from '../services/firmsIngestionService';
 import { FireQueryParams } from '../types';
 
 export class FireController {
@@ -12,6 +13,7 @@ export class FireController {
         minLon: q.minLon !== undefined ? parseFloat(q.minLon as string) : undefined,
         maxLon: q.maxLon !== undefined ? parseFloat(q.maxLon as string) : undefined,
         confidence: q.confidence !== undefined ? parseFloat(q.confidence as string) : undefined,
+        confidenceCategory: q.confidenceCategory ? (String(q.confidenceCategory).toUpperCase() as any) : undefined,
         minFrp: q.minFrp !== undefined ? parseFloat(q.minFrp as string) : undefined,
         sensor: q.sensor as string,
         satellite: q.satellite as string,
@@ -29,8 +31,8 @@ export class FireController {
         data: result.items,
         meta: {
           total: result.total,
-          limit: params.limit,
-          offset: params.offset,
+          limit: result.limit,
+          offset: result.offset,
           timestamp: new Date().toISOString()
         }
       });
@@ -84,6 +86,26 @@ export class FireController {
     try {
       const overview = await FireService.getDashboardOverview();
       res.json({ success: true, data: overview });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  public static async ingestFires(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { sources, queryMode, countryCode, areaBbox, dayRange, date } = req.body || {};
+      const summary = await FirmsIngestionService.executeSyncJob({
+        sources: Array.isArray(sources) && sources.length > 0 ? sources : undefined,
+        queryMode,
+        countryCode,
+        areaBbox,
+        dayRange: dayRange ? parseInt(String(dayRange), 10) : undefined,
+        date
+      });
+      res.json({
+        success: summary.status === 'COMPLETED' || summary.status === 'PARTIAL',
+        data: summary
+      });
     } catch (err) {
       next(err);
     }

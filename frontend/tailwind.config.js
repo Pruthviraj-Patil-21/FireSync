@@ -22,6 +22,34 @@ export default {
           orange: '#ff5722',
           red: '#ff1744',
           amber: '#ffab00',
+        },
+        // Scientific palette tokens (NASA Space Apps 2026 design system)
+        graphite: {
+          950: '#10171B',
+          900: '#192227',
+          800: '#26343B', // primary graphite
+          700: '#34454E',
+          600: '#465A65',
+        },
+        ivory: {
+          DEFAULT: '#F4F1E9', // warm ivory
+          muted: '#DDD8CB',
+          subtle: '#B5AFA0',
+        },
+        teal: {
+          scientific: '#276B62', // deep teal
+          light: '#388F83',
+          dark: '#1B4D46',
+        },
+        terracotta: {
+          DEFAULT: '#C36C50', // terracotta fire
+          light: '#D48168',
+          dark: '#9E5038',
+        },
+        ochre: {
+          DEFAULT: '#C3A36A', // muted ochre
+          light: '#D5BC8A',
+          dark: '#9E804B',
         }
       },
       fontFamily: {

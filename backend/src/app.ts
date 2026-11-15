@@ -4,6 +4,7 @@ import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import swaggerUi from 'swagger-ui-express';
 import apiRoutes from './routes';
+import harmonizationRoutes from './routes/harmonizationRoutes';
 import { errorHandler } from './middleware/errorHandler';
 import { rateLimiter } from './middleware/rateLimiter';
 import { logger } from './config/logger';
@@ -129,6 +130,9 @@ app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(openApiSpec));
 app.get('/health', (req, res) => {
   res.json({ status: 'HEALTHY', timestamp: new Date().toISOString() });
 });
+
+// Mount Harmonization API (direct & V1 paths)
+app.use('/api/harmonization', harmonizationRoutes);
 
 // Mount V1 API
 app.use('/api/v1', apiRoutes);

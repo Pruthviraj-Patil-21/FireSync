@@ -33,6 +33,19 @@ enum IngestionStatus {
   RUNNING
 }
 
+enum HarmonizationRunStatus {
+  RUNNING
+  COMPLETED
+  PARTIAL
+  FAILED
+}
+
+enum HarmonizationMatchClass {
+  CANDIDATE_MATCH
+  MODIS_ONLY
+  VIIRS_ONLY
+}
+
 model User {
   id             String          @id @default(uuid())
   email          String          @unique
@@ -79,26 +92,35 @@ model FireObservation {
   observationTime    DateTime      @map("observation_time")
   acquisitionDate    DateTime      @map("acquisition_date")
   satellitePlatform  String        @map("satellite_platform")
+  satelliteCode      String?       @map("satellite_code")
   sensor             String
-  confidence         Float
+  confidence         Float?
+  confidenceRaw      String?       @map("confidence_raw")
+  confidenceCategory String?       @map("confidence_category")
   brightnessTemp     Float?        @map("brightness_temp")
+  brightnessTemp31   Float?        @map("brightness_temp_31")
   frp                Float?
   scan               Float?
   track              Float?
   dayNight           String?       @map("day_night")
+  version            String?
   sourceDataset      String        @map("source_dataset")
   sourceId           String?       @unique @map("source_id")
   incidentId         String?       @map("incident_id")
   incident           FireIncident? @relation(fields: [incidentId], references: [id], onDelete: SetNull)
   ingestedAt         DateTime      @default(now()) @map("ingested_at")
   metadata           Json?
+  modisMatches       HarmonizedObservationMatch[] @relation("ModisObservationMatches")
+  viirsMatches       HarmonizedObservationMatch[] @relation("ViirsObservationMatches")
 
   @@index([latitude, longitude])
   @@index([observationTime])
   @@index([confidence])
+  @@index([confidenceCategory])
   @@index([frp])
   @@index([satellitePlatform])
   @@index([sensor])
+  @@index([sensor, observationTime])
   @@map("fire_observations")
 }
 
@@ -235,5 +257,95 @@ model DataIngestionLog {
   @@index([source, startTime])
   @@index([status])
   @@map("data_ingestion_logs")
+}
+
+model HarmonizationRun {
+  id                     String                      @id @default(uuid())
+  regionName             String                      @map("region_name")
+  minLat                 Float?                      @map("min_lat")
+  maxLat                 Float?                      @map("max_lat")
+  minLon                 Float?                      @map("min_lon")
+  maxLon                 Float?                      @map("max_lon")
+  startDate              DateTime?                   @map("start_date")
+  endDate                DateTime?                   @map("end_date")
+  gridResolutionM        Float                       @default(1000.0) @map("grid_resolution_m")
+  spatialCrs             String                      @default("EPSG:8857") @map("spatial_crs")
+  spatialDistanceM       Float                       @default(1500.0) @map("spatial_distance_m")
+  timeWindowMinutes      Float                       @default(60.0) @map("time_window_minutes")
+  status                 HarmonizationRunStatus      @default(RUNNING)
+  totalInputObservations Int                         @default(0) @map("total_input_observations")
+  validModisCount        Int                         @default(0) @map("valid_modis_count")
+  validViirsCount        Int                         @default(0) @map("valid_viirs_count")
+  rejectedCount          Int                         @default(0) @map("rejected_count")
+  candidateMatchCount    Int                         @default(0) @map("candidate_match_count")
+  modisOnlyCount         Int                         @default(0) @map("modis_only_count")
+  viirsOnlyCount         Int                         @default(0) @map("viirs_only_count")
+  uniqueGridCells        Int                         @default(0) @map("unique_grid_cells")
+  scientificNotes        Json?                       @map("scientific_notes")
+  errorMessage           String?                     @map("error_message")
+  createdAt              DateTime                    @default(now()) @map("created_at")
+  completedAt            DateTime?                   @map("completed_at")
+  matches                HarmonizedObservationMatch[]
+  dailySummaries         HarmonizedDailySummary[]
+
+  @@index([status, createdAt])
+  @@map("harmonization_runs")
+}
+
+model HarmonizedObservationMatch {
+  id                  String                   @id @default(uuid())
+  runId               String                   @map("run_id")
+  run                 HarmonizationRun         @relation(fields: [runId], references: [id], onDelete: Cascade)
+  matchKey            String                   @map("match_key")
+  matchClass          HarmonizationMatchClass  @map("match_class")
+  modisObservationId  String?                  @map("modis_observation_id")
+  modisObservation    FireObservation?         @relation("ModisObservationMatches", fields: [modisObservationId], references: [id], onDelete: SetNull)
+  viirsObservationId  String?                  @map("viirs_observation_id")
+  viirsObservation    FireObservation?         @relation("ViirsObservationMatches", fields: [viirsObservationId], references: [id], onDelete: SetNull)
+  gridCellId          String                   @map("grid_cell_id")
+  spatialCrs          String                   @default("EPSG:8857") @map("spatial_crs")
+  gridResolutionM     Float                    @default(1000.0) @map("grid_resolution_m")
+  distanceM           Float?                   @map("distance_m")
+  timeDiffMinutes     Float?                   @map("time_diff_minutes")
+  matchScore          Float?                   @map("match_score")
+  matchingCriteria    Json?                    @map("matching_criteria")
+  acqDate             DateTime                 @map("acq_date")
+  createdAt           DateTime                 @default(now()) @map("created_at")
+
+  @@unique([runId, matchKey])
+  @@index([runId, matchClass])
+  @@index([runId, gridCellId])
+  @@index([modisObservationId])
+  @@index([viirsObservationId])
+  @@map("harmonized_observation_matches")
+}
+
+model HarmonizedDailySummary {
+  id                    String           @id @default(uuid())
+  runId                 String           @map("run_id")
+  run                   HarmonizationRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  date                  DateTime
+  regionName            String           @map("region_name")
+  modisCount            Int              @default(0) @map("modis_count")
+  viirsCount            Int              @default(0) @map("viirs_count")
+  candidateMatchCount   Int              @default(0) @map("candidate_match_count")
+  modisOnlyCount        Int              @default(0) @map("modis_only_count")
+  viirsOnlyCount        Int              @default(0) @map("viirs_only_count")
+  uniqueGridCells       Int              @default(0) @map("unique_grid_cells")
+  modisValidFrpCount    Int              @default(0) @map("modis_valid_frp_count")
+  modisFrpSumMw         Float?           @map("modis_frp_sum_mw")
+  modisFrpMeanMw        Float?           @map("modis_frp_mean_mw")
+  modisFrpMaxMw         Float?           @map("modis_frp_max_mw")
+  viirsValidFrpCount    Int              @default(0) @map("viirs_valid_frp_count")
+  viirsFrpSumMw         Float?           @map("viirs_frp_sum_mw")
+  viirsFrpMeanMw        Float?           @map("viirs_frp_mean_mw")
+  viirsFrpMaxMw         Float?           @map("viirs_frp_max_mw")
+  estimatedBurnedAreaHa Float?           @map("estimated_burned_area_ha")
+  provenanceAndNotes    Json?            @map("provenance_and_notes")
+  createdAt             DateTime         @default(now()) @map("created_at")
+
+  @@unique([runId, date])
+  @@index([date])
+  @@map("harmonized_daily_summaries")
 }
 

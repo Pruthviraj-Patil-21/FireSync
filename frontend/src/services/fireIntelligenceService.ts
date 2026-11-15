@@ -10,12 +10,12 @@ export interface EnrichedHotspot extends HotspotPoint {
   acquiredUtcString: string;
   hoursAgo: number;
   isNewDetection: boolean;
-  brightnessTempK: number;
-  brightnessTempC: number;
+  brightnessTempK: number | null;
+  brightnessTempC: number | null;
   sensorFamily: 'VIIRS' | 'MODIS';
   specificMission: 'Terra MODIS' | 'Aqua MODIS' | 'Suomi-NPP VIIRS' | 'NOAA-20 VIIRS' | 'NOAA-21 VIIRS';
   confidenceCategory: 'High' | 'Nominal' | 'Low';
-  frpCategory: 'Extreme' | 'Severe' | 'Elevated' | 'Moderate';
+  frpCategory: 'Extreme' | 'Severe' | 'Elevated' | 'Moderate' | 'Not reported';
 }
 
 export interface RegionalMetric {
@@ -23,8 +23,8 @@ export interface RegionalMetric {
   country: string;
   continent: string;
   count: number;
-  avgFrp: number;
-  maxFrp: number;
+  avgFrp: number | null;
+  maxFrp: number | null;
   riskLevel: 'Extreme' | 'Severe' | 'Elevated' | 'Moderate';
   trend: string;
   center: [number, number];
@@ -171,14 +171,18 @@ const ENRICHED_CATALOG: EnrichedHotspot[] = GLOBAL_HOTSPOTS.map((point, index) =
   const obsDate = new Date(now.getTime() - hoursAgo * 3600 * 1000);
   const acquiredUtcString = `${obsDate.toISOString().slice(0, 10)} ${obsDate.toISOString().slice(11, 16)} UTC`;
 
-  const brightnessTempK = point.brightnessTemp || Math.round(330 + (point.frp / 450) * 65);
+  const brightnessTempK = point.brightnessTemp || (typeof point.frp === 'number' ? Math.round(330 + (point.frp / 450) * 65) : 320);
   const brightnessTempC = Math.round(brightnessTempK - 273.15);
 
   const confidenceCategory =
-    point.confidence >= 80 ? 'High' : point.confidence >= 50 ? 'Nominal' : 'Low';
+    typeof point.confidence === 'number'
+      ? point.confidence >= 80 ? 'High' : point.confidence >= 50 ? 'Nominal' : 'Low'
+      : 'Nominal';
 
   const frpCategory =
-    point.frp >= 380 ? 'Extreme' : point.frp >= 310 ? 'Severe' : point.frp >= 250 ? 'Elevated' : 'Moderate';
+    typeof point.frp === 'number'
+      ? point.frp >= 380 ? 'Extreme' : point.frp >= 310 ? 'Severe' : point.frp >= 250 ? 'Elevated' : 'Moderate'
+      : 'Not reported';
 
   return {
     ...point,
@@ -217,7 +221,9 @@ export function getEnrichedHotspots(timeRange: TimeRangeFilter = '24h'): Enriche
       // Deterministic slight spatial offset along the same fire front (e.g. 0.04 to 0.12 deg)
       const latOffset = ((i + cycle * 7) % 5 - 2) * 0.035;
       const lonOffset = ((i + cycle * 3) % 5 - 2) * 0.035;
-      const frpVariation = Math.max(120, Math.round(base.frp * (0.85 + ((i + cycle) % 5) * 0.06)));
+      const frpVariation = typeof base.frp === 'number'
+        ? Math.max(120, Math.round(base.frp * (0.85 + ((i + cycle) % 5) * 0.06)))
+        : null;
       const cycleHoursAgo = parseFloat((base.hoursAgo + cycle * 22.5).toFixed(1));
       const now = new Date();
       const obsDate = new Date(now.getTime() - cycleHoursAgo * 3600 * 1000);
@@ -246,21 +252,24 @@ export function getEnrichedHotspots(timeRange: TimeRangeFilter = '24h'): Enriche
 export function getGlobalMetrics(hotspots: EnrichedHotspot[], timeRange: TimeRangeFilter): GlobalDashboardMetrics {
   const activeDetections = hotspots.length;
   const newDetections = hotspots.filter((h) => h.isNewDetection).length;
-  const highConfidenceList = hotspots.filter((h) => h.confidence >= 80);
+  const highConfidenceList = hotspots.filter(
+    (h) => h.confidenceCategory === 'High' || (typeof h.confidence === 'number' && h.confidence >= 80)
+  );
   const highConfidenceDetections = highConfidenceList.length;
   const highConfidencePct = activeDetections > 0 ? Math.round((highConfidenceDetections / activeDetections) * 100) : 0;
 
   const countriesSet = new Set(hotspots.map((h) => h.country));
   const continentsSet = new Set(hotspots.map((h) => h.continent));
 
-  const totalFrp = hotspots.reduce((sum, h) => sum + h.frp, 0);
-  const avgFrp = activeDetections > 0 ? Math.round(totalFrp / activeDetections) : 0;
+  const hotspotsWithFrp = hotspots.filter((h) => typeof h.frp === 'number' && Number.isFinite(h.frp));
+  const totalFrp = hotspotsWithFrp.reduce((sum, h) => sum + (h.frp as number), 0);
+  const avgFrp = hotspotsWithFrp.length > 0 ? Math.round(totalFrp / hotspotsWithFrp.length) : 0;
 
   let peakFrpHotspot: EnrichedHotspot | null = null;
   let peakFrp = 0;
-  hotspots.forEach((h) => {
-    if (h.frp > peakFrp) {
-      peakFrp = h.frp;
+  hotspotsWithFrp.forEach((h) => {
+    if ((h.frp as number) > peakFrp) {
+      peakFrp = h.frp as number;
       peakFrpHotspot = h;
     }
   });
@@ -317,19 +326,20 @@ export function getRegionalIntelligence(hotspots: EnrichedHotspot[]): RegionalMe
   map.forEach((val, country) => {
     const list = val.hotspots;
     const count = list.length;
-    const totalFrp = list.reduce((sum, h) => sum + h.frp, 0);
-    const avgFrp = Math.round(totalFrp / count);
-    const maxFrp = Math.max(...list.map((h) => h.frp));
+    const listWithFrp = list.filter((h) => typeof h.frp === 'number' && Number.isFinite(h.frp));
+    const totalFrp = listWithFrp.reduce((sum, h) => sum + (h.frp as number), 0);
+    const avgFrp = listWithFrp.length > 0 ? Math.round(totalFrp / listWithFrp.length) : null;
+    const maxFrp = listWithFrp.length > 0 ? Math.max(...listWithFrp.map((h) => h.frp as number)) : null;
 
     const avgLat = list.reduce((sum, h) => sum + h.lat, 0) / count;
     const avgLon = list.reduce((sum, h) => sum + h.lon, 0) / count;
 
     const riskLevel: RegionalMetric['riskLevel'] =
-      avgFrp >= 350 || maxFrp >= 410
+      (avgFrp !== null && avgFrp >= 350) || (maxFrp !== null && maxFrp >= 410)
         ? 'Extreme'
-        : avgFrp >= 300
+        : avgFrp !== null && avgFrp >= 300
         ? 'Severe'
-        : avgFrp >= 250
+        : avgFrp !== null && avgFrp >= 250
         ? 'Elevated'
         : 'Moderate';
 
@@ -467,7 +477,10 @@ export function getDiurnalTimeline(hotspots: EnrichedHotspot[]): DiurnalHourlyPo
 
   const viirsTotal = hotspots.filter((h) => h.sensorFamily === 'VIIRS').length;
   const modisTotal = hotspots.filter((h) => h.sensorFamily === 'MODIS').length;
-  const avgFrp = Math.round(hotspots.reduce((s, h) => s + h.frp, 0) / (hotspots.length || 1));
+  const hotspotsWithFrp = hotspots.filter((h) => typeof h.frp === 'number' && Number.isFinite(h.frp));
+  const avgFrp = hotspotsWithFrp.length > 0
+    ? Math.round(hotspotsWithFrp.reduce((s, h) => s + (h.frp as number), 0) / hotspotsWithFrp.length)
+    : 0;
 
   return hours.map((hour, idx) => {
     const weight = distributionWeights[idx];
@@ -487,14 +500,24 @@ export function getDiurnalTimeline(hotspots: EnrichedHotspot[]): DiurnalHourlyPo
  * Confidence Distribution for Chart 4
  */
 export function getConfidenceDistribution(hotspots: EnrichedHotspot[]) {
-  const high = hotspots.filter((h) => h.confidence >= 80).length;
-  const nominal = hotspots.filter((h) => h.confidence >= 50 && h.confidence < 80).length;
-  const low = hotspots.filter((h) => h.confidence < 50).length;
+  const high = hotspots.filter(
+    (h) => h.confidenceCategory === 'High' || (typeof h.confidence === 'number' && h.confidence >= 80)
+  ).length;
+  const nominal = hotspots.filter(
+    (h) =>
+      h.confidenceCategory === 'Nominal' ||
+      (typeof h.confidence === 'number' && h.confidence >= 50 && h.confidence < 80)
+  ).length;
+  const low = hotspots.filter(
+    (h) =>
+      h.confidenceCategory === 'Low' ||
+      (typeof h.confidence === 'number' && h.confidence < 50)
+  ).length;
 
   return [
-    { name: 'High Confidence (>= 80%)', count: high, color: '#10b981', category: 'High' },
-    { name: 'Nominal Confidence (50-79%)', count: nominal, color: '#f59e0b', category: 'Nominal' },
-    { name: 'Low Confidence (< 50%)', count: low, color: '#94a3b8', category: 'Low' },
+    { name: 'High Confidence (>= 80% / High)', count: high, color: '#10b981', category: 'High' },
+    { name: 'Nominal Confidence (50-79% / Nominal)', count: nominal, color: '#f59e0b', category: 'Nominal' },
+    { name: 'Low Confidence (< 50% / Low)', count: low, color: '#94a3b8', category: 'Low' },
   ];
 }
 
@@ -503,39 +526,54 @@ export function getConfidenceDistribution(hotspots: EnrichedHotspot[]) {
  */
 export function convertApiObservationToEnriched(apiObs: any): EnrichedHotspot {
   const isViirs = apiObs.sensorFamily === 'VIIRS' || (apiObs.sensor || '').toUpperCase().includes('VIIRS');
-  const frp = apiObs.frp || 180;
-  const brightnessTempK = apiObs.brightnessTempK || Math.round(335 + (frp / 440) * 55);
-  const brightnessTempC = apiObs.brightnessTempC || Math.round(brightnessTempK - 273.15);
+  const frp = typeof apiObs.frp === 'number' && Number.isFinite(apiObs.frp) ? apiObs.frp : null;
+  const brightnessTempK = typeof apiObs.brightnessTempK === 'number' && Number.isFinite(apiObs.brightnessTempK) ? apiObs.brightnessTempK : null;
+  const brightnessTempC = typeof apiObs.brightnessTempC === 'number' && Number.isFinite(apiObs.brightnessTempC) ? apiObs.brightnessTempC : (brightnessTempK !== null ? Math.round(brightnessTempK - 273.15) : null);
 
   let confidenceCategory: 'High' | 'Nominal' | 'Low' = 'Nominal';
-  if (apiObs.confidence >= 80) confidenceCategory = 'High';
-  else if (apiObs.confidence < 50) confidenceCategory = 'Low';
+  const catRaw = (apiObs.confidenceCategory || '').toUpperCase();
+  if (catRaw === 'HIGH' || catRaw === 'H') {
+    confidenceCategory = 'High';
+  } else if (catRaw === 'LOW' || catRaw === 'L') {
+    confidenceCategory = 'Low';
+  } else if (typeof apiObs.confidence === 'number') {
+    if (apiObs.confidence >= 80) confidenceCategory = 'High';
+    else if (apiObs.confidence < 50) confidenceCategory = 'Low';
+    else confidenceCategory = 'Nominal';
+  }
 
-  let frpCategory: 'Extreme' | 'Severe' | 'Elevated' | 'Moderate' = 'Moderate';
-  if (frp >= 380) frpCategory = 'Extreme';
-  else if (frp >= 300) frpCategory = 'Severe';
-  else if (frp >= 200) frpCategory = 'Elevated';
+  let frpCategory: 'Extreme' | 'Severe' | 'Elevated' | 'Moderate' | 'Not reported' = 'Not reported';
+  if (typeof frp === 'number') {
+    if (frp >= 380) frpCategory = 'Extreme';
+    else if (frp >= 300) frpCategory = 'Severe';
+    else if (frp >= 200) frpCategory = 'Elevated';
+    else frpCategory = 'Moderate';
+  }
 
   let specificMission: 'Terra MODIS' | 'Aqua MODIS' | 'Suomi-NPP VIIRS' | 'NOAA-20 VIIRS' | 'NOAA-21 VIIRS' = 'Suomi-NPP VIIRS';
-  if (apiObs.satellite?.includes('NOAA-20')) specificMission = 'NOAA-20 VIIRS';
-  else if (apiObs.satellite?.includes('Terra')) specificMission = 'Terra MODIS';
-  else if (apiObs.satellite?.includes('Aqua')) specificMission = 'Aqua MODIS';
+  const satStr = (apiObs.satellite || '').toUpperCase();
+  if (satStr.includes('NOAA-21') || satStr.includes('NOAA21') || satStr.includes('J2')) specificMission = 'NOAA-21 VIIRS';
+  else if (satStr.includes('NOAA-20') || satStr.includes('NOAA20') || satStr.includes('J1')) specificMission = 'NOAA-20 VIIRS';
+  else if (satStr.includes('TERRA')) specificMission = 'Terra MODIS';
+  else if (satStr.includes('AQUA')) specificMission = 'Aqua MODIS';
 
-  const satName = (apiObs.satellite?.includes('VIIRS')
-    ? (apiObs.satellite.includes('NOAA-20') ? 'VIIRS (NOAA-20)' : 'VIIRS (S-NPP)')
-    : (apiObs.satellite?.includes('Aqua') ? 'MODIS (Aqua)' : 'MODIS (Terra)')) as any;
+  let satName: string = 'VIIRS (S-NPP)';
+  if (specificMission === 'NOAA-21 VIIRS') satName = 'VIIRS (NOAA-21)';
+  else if (specificMission === 'NOAA-20 VIIRS') satName = 'VIIRS (NOAA-20)';
+  else if (specificMission === 'Aqua MODIS') satName = 'MODIS (Aqua)';
+  else if (specificMission === 'Terra MODIS') satName = 'MODIS (Terra)';
 
   return {
     id: apiObs.id,
     lat: apiObs.lat,
     lon: apiObs.lon,
-    intensity: Math.min(1.0, Math.max(0.2, frp / 440)),
+    intensity: typeof frp === 'number' ? Math.min(1.0, Math.max(0.2, frp > 0 ? frp / 100 : 0.3)) : 0.4,
     frp,
-    confidence: apiObs.confidence,
+    confidence: apiObs.confidence ?? null,
     region: apiObs.region || `${apiObs.country} Wildfire Sector`,
-    satellite: satName,
+    satellite: satName as any,
     country: apiObs.country,
-    countryCode: apiObs.country.substring(0, 3).toUpperCase(),
+    countryCode: (apiObs.country || 'GLB').substring(0, 3).toUpperCase(),
     continent: apiObs.continent,
     sectorName: apiObs.region,
     acquiredUtcString: apiObs.observationTime?.slice(0, 16).replace('T', ' ') + ' UTC',

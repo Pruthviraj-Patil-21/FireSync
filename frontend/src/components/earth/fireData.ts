@@ -6,43 +6,44 @@ export interface HotspotPoint {
   lat: number;
   lon: number;
   intensity: number; // 0.2 to 1.0
-  frp: number; // Fire Radiative Power (MW)
-  confidence: number; // %
+  frp: number | null; // Fire Radiative Power (MW) or null if missing
+  confidence: number | null; // % or null for categorical
+  confidenceCategory?: string;
   region: string;
-  satellite: 'MODIS (Terra)' | 'MODIS (Aqua)' | 'VIIRS (S-NPP)' | 'VIIRS (NOAA-20)';
+  satellite: 'MODIS (Terra)' | 'MODIS (Aqua)' | 'VIIRS (S-NPP)' | 'VIIRS (NOAA-20)' | 'VIIRS (NOAA-21)' | string;
   acquiredDate?: string;
   acquiredTime?: string;
   beforeDate?: string;
-  brightnessTemp?: number; // Kelvin
+  brightnessTemp?: number | null; // Kelvin
   scanResolution?: string;
-  dayNight?: 'Day (Ascending)' | 'Night (Descending)';
+  dayNight?: string;
 }
 
 export interface HotspotDetailedMetadata {
   acquiredDate: string;
   acquiredTime: string;
   beforeDate: string;
-  brightnessTemp: number;
+  brightnessTemp: number | null;
   scanResolution: string;
-  dayNight: 'Day (Ascending)' | 'Night (Descending)';
+  dayNight: string;
   sensor: 'VIIRS' | 'MODIS';
   platform: string;
-  biomassCombustionRateKgS: number;
+  biomassCombustionRateKgS: number | null;
 }
 
 export function getHotspotMetadata(point: HotspotPoint): HotspotDetailedMetadata {
   const isViirs = point.satellite.includes('VIIRS');
-  const acquiredDate = point.acquiredDate || '2024-08-18';
-  const acquiredTime = point.acquiredTime || (isViirs ? '17:42 UTC' : '14:25 UTC');
-  const beforeDate = point.beforeDate || '2024-07-28';
-  const brightnessTemp = point.brightnessTemp || Math.round(335 + (point.frp / 440) * 55);
-  const scanResolution = point.scanResolution || (isViirs ? '375m I-Band (I4/I5)' : '250m/1km Multi-spectral');
+  const acquiredDate = point.acquiredDate || '2026-11-13';
+  const acquiredTime = point.acquiredTime || (isViirs ? '10:19 UTC' : '02:49 UTC');
+  const beforeDate = point.beforeDate || '2026-11-12';
+  const brightnessTemp = typeof point.brightnessTemp === 'number' ? point.brightnessTemp : null;
+  const scanResolution = point.scanResolution || (isViirs ? '375m I-Band (I4/I5)' : '1000m Multi-spectral');
   const dayNight = point.dayNight || 'Day (Ascending)';
   const sensor = isViirs ? 'VIIRS' : 'MODIS';
   const platform = isViirs
-    ? (point.satellite.includes('NOAA-20') ? 'NOAA-20 (JPSS-1)' : 'Suomi-NPP')
+    ? (point.satellite.includes('NOAA-21') ? 'NOAA-21 (JPSS-2)' : point.satellite.includes('NOAA-20') ? 'NOAA-20 (JPSS-1)' : 'Suomi-NPP')
     : (point.satellite.includes('Aqua') ? 'Aqua (EOS PM-1)' : 'Terra (EOS AM-1)');
-  const biomassCombustionRateKgS = parseFloat((point.frp * 0.082).toFixed(1));
+  const biomassCombustionRateKgS = typeof point.frp === 'number' ? parseFloat((point.frp * 0.082).toFixed(1)) : null;
 
   return {
     acquiredDate,

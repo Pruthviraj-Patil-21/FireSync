@@ -101,14 +101,36 @@ const BASEMAP_CONFIGS: Record<BasemapStyle, BasemapConfig> = {
 const NASA_GIBS_URL =
   'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_SNPP_CorrectedReflectance_TrueColor/default/2024-08-18/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpg';
 
-// Controller to smoothly pan and zoom map
+// Controller to smoothly pan and zoom map with automatic container resize invalidation
 const MapViewController: React.FC<{
   center: [number, number];
   zoom: number;
 }> = ({ center, zoom }) => {
   const map = useMap();
+
   useEffect(() => {
-    map.flyTo(center, zoom, { duration: 1.2, easeLinearity: 0.25 });
+    const triggerInvalidate = () => {
+      try {
+        map.invalidateSize();
+      } catch (e) {}
+    };
+    triggerInvalidate();
+    const t1 = setTimeout(triggerInvalidate, 80);
+    const t2 = setTimeout(triggerInvalidate, 250);
+    const t3 = setTimeout(triggerInvalidate, 600);
+    window.addEventListener('resize', triggerInvalidate);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+      clearTimeout(t3);
+      window.removeEventListener('resize', triggerInvalidate);
+    };
+  }, [map]);
+
+  useEffect(() => {
+    try {
+      map.flyTo(center, zoom, { duration: 1.2, easeLinearity: 0.25 });
+    } catch (e) {}
   }, [center, zoom, map]);
   return null;
 };
@@ -168,8 +190,8 @@ interface HotspotCluster {
   centerLat: number;
   centerLon: number;
   count: number;
-  avgFrp: number;
-  maxFrp: number;
+  avgFrp: number | null;
+  maxFrp: number | null;
   hotspots: EnrichedHotspot[];
 }
 
@@ -296,7 +318,7 @@ export const DashboardGlobalMap: React.FC<DashboardGlobalMapProps> = ({
       if (sensorFilter !== 'ALL' && h.sensorFamily !== sensorFilter) {
         return false;
       }
-      if (minConfidenceFilter > 0 && h.confidence < minConfidenceFilter) {
+      if (minConfidenceFilter > 0 && typeof h.confidence === 'number' && h.confidence < minConfidenceFilter) {
         return false;
       }
       if (searchQuery.trim()) {
@@ -335,8 +357,9 @@ export const DashboardGlobalMap: React.FC<DashboardGlobalMapProps> = ({
       const count = list.length;
       const centerLat = list.reduce((sum, h) => sum + h.lat, 0) / count;
       const centerLon = list.reduce((sum, h) => sum + h.lon, 0) / count;
-      const avgFrp = Math.round(list.reduce((sum, h) => sum + h.frp, 0) / count);
-      const maxFrp = Math.max(...list.map((h) => h.frp));
+      const withFrp = list.filter((h) => typeof h.frp === 'number');
+      const avgFrp = withFrp.length > 0 ? Math.round(withFrp.reduce((sum, h) => sum + (h.frp as number), 0) / withFrp.length) : null;
+      const maxFrp = withFrp.length > 0 ? Math.max(...withFrp.map((h) => h.frp as number)) : null;
       const first = list[0];
 
       result.push({
@@ -366,13 +389,15 @@ export const DashboardGlobalMap: React.FC<DashboardGlobalMapProps> = ({
   };
 
   // Marker coloring based on scientific FRP thresholds
-  const getMarkerColor = (frp: number) => {
+  const getMarkerColor = (frp: number | null) => {
+    if (typeof frp !== 'number') return '#38bdf8'; // Sky blue for detected anomaly with unmeasured/nominal FRP
     if (frp >= 380) return '#ef4444'; // Extreme (Crimson)
     if (frp >= 310) return '#f97316'; // Severe (Orange)
     return '#eab308'; // Elevated (Amber)
   };
 
-  const getMarkerRadius = (frp: number) => {
+  const getMarkerRadius = (frp: number | null) => {
+    if (typeof frp !== 'number') return 4.5;
     if (frp >= 400) return 7.5;
     if (frp >= 330) return 6;
     return 4.5;
@@ -614,7 +639,13 @@ export const DashboardGlobalMap: React.FC<DashboardGlobalMapProps> = ({
             isShowingClusters &&
             clusters.map((cluster) => {
               const clusterColor =
-                cluster.maxFrp >= 380 ? '#ef4444' : cluster.maxFrp >= 310 ? '#f97316' : '#eab308';
+                typeof cluster.maxFrp === 'number'
+                  ? cluster.maxFrp >= 380
+                    ? '#ef4444'
+                    : cluster.maxFrp >= 310
+                    ? '#f97316'
+                    : '#eab308'
+                  : '#00e5ff';
               const radius = Math.min(22, 12 + Math.log2(cluster.count) * 3.5);
 
               return (
@@ -692,9 +723,9 @@ export const DashboardGlobalMap: React.FC<DashboardGlobalMapProps> = ({
                         <div className="font-bold text-white mb-1">{point.region}</div>
                         <div className="text-nasa-cyan text-[11px]">{point.country} &bull; {point.continent}</div>
                         <div className="mt-2 text-slate-300">
-                          <div>FRP: <span className="text-nasa-orange font-bold">{point.frp} MW</span></div>
+                          <div>FRP: <span className="text-nasa-orange font-bold">{typeof point.frp === 'number' ? `${point.frp} MW` : 'N/A'}</span></div>
                           <div>Sensor: <span className="text-white">{point.specificMission}</span></div>
-                          <div>Conf: <span className="text-emerald-400">{point.confidence}%</span></div>
+                          <div>Conf: <span className="text-emerald-400">{point.confidenceCategory ? `${point.confidenceCategory} CONF` : typeof point.confidence === 'number' ? `${point.confidence}%` : 'NOMINAL'}</span></div>
                           <div>Time: <span className="text-slate-400">{point.acquiredUtcString}</span></div>
                         </div>
                         <button
@@ -764,13 +795,23 @@ export const DashboardGlobalMap: React.FC<DashboardGlobalMapProps> = ({
                 <div className="bg-space-900/80 p-2 rounded-lg border border-white/5">
                   <span className="text-slate-500 block text-[10px]">RADIATIVE POWER</span>
                   <span className="text-nasa-orange font-bold text-sm">
-                    {selectedHotspot.frp} <span className="text-xs font-normal text-slate-400">MW</span>
+                    {typeof selectedHotspot.frp === 'number' ? (
+                      <>
+                        {selectedHotspot.frp} <span className="text-xs font-normal text-slate-400">MW</span>
+                      </>
+                    ) : (
+                      <span className="text-xs font-normal text-slate-400">Not reported</span>
+                    )}
                   </span>
                 </div>
                 <div className="bg-space-900/80 p-2 rounded-lg border border-white/5">
                   <span className="text-slate-500 block text-[10px]">BRIGHTNESS TEMP</span>
                   <span className="text-amber-300 font-semibold">
-                    {selectedHotspot.brightnessTempK} K ({selectedHotspot.brightnessTempC}°C)
+                    {typeof selectedHotspot.brightnessTempK === 'number' ? (
+                      `${selectedHotspot.brightnessTempK} K (${selectedHotspot.brightnessTempC}°C)`
+                    ) : (
+                      <span className="text-xs font-normal text-slate-400">Not reported</span>
+                    )}
                   </span>
                 </div>
                 <div className="bg-space-900/80 p-2 rounded-lg border border-white/5">
